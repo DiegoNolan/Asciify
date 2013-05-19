@@ -1,3 +1,4 @@
+
 import Codec.Picture
 import Codec.Picture.Types
 import Data.Word
@@ -5,6 +6,7 @@ import Data.Either.Unwrap
 import Data.Functor ((<$>))
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Vector.Storable as V
+import Data.Char
 import System.IO
 
 type CharShape = (Word8, Word8, Word8, Word8)
@@ -12,6 +14,13 @@ type CharShape = (Word8, Word8, Word8, Word8)
 type RCord = (Rational, Rational)
 
 data Quadrant = Blank | Light | Dark
+
+-- write chars
+writeChars = do
+   handle <- openFile "chars.txt" WriteMode
+   hPutStr handle (map chr [32..126])
+
+-- end write chars
 
 tl (x,_,_,_) = x
 tr (_,x,_,_) = x
@@ -25,21 +34,46 @@ testGSImage fname = do
 heightToWidth :: Rational
 heightToWidth = (2/3)
 
+remFileExt :: String -> String
+remFileExt = reverse . (drop 1) . ( dropWhile (/='.')) . reverse
+
 test fname w = do
    img <- testGSImage fname
-   handle <- openFile "test.txt" WriteMode
+   handle <- openFile ((remFileExt fname) ++ "_quad.txt") WriteMode
    let str = compAsciify img w
    putStr str
    hPutStr handle str
 
+   h2 <- openFile ((remFileExt fname) ++ "_scale.txt") WriteMode
+   let str = scaleAsciify img w
+   putStr str
+   hPutStr h2 str
+
 --compAsciify :: Image Pixel8 -> Int -> String
-compAsciify img chsWide = foldl (\acc j -> acc ++ row j ++ "\n") "" [0..(chsHigh)]
-   where dim = charDims img chsWide
+compAsciify iMG chsWide = foldl (\acc j -> acc ++ row j ++ "\n") ""
+   [0..(chsHigh)]
+   where img = normPixels iMG
+         dim = charDims img chsWide
          chsHigh = ceiling ((fromIntegral (imageHeight img))/(snd dim))
          row c = map (\i -> shapeToAscii (shape img
                ((fromIntegral i)*(fst dim),(fromIntegral c)*(snd dim)) dim) )
                [0..(chsWide-1)]
 
+scaleAsciify iMG chsWide = foldl (\acc j -> acc ++ row j ++ "\n") ""
+   [0..(chsHigh)]
+   where img = normPixels iMG
+         dim = charDims img chsWide
+         chsHigh = ceiling ((fromIntegral (imageHeight img))/(snd dim))
+         row c = map (\i -> asciiReplace $ meanInRect img
+               ((fromIntegral i)*(fst dim),(fromIntegral c)*(snd dim)) dim)
+               [0..(chsWide-1)]
+
+normPixels :: Image Pixel8 -> Image Pixel8
+normPixels img = pixelMap
+   (\p -> floor (((fromIntegral p)-pMin)*(255/(pMax-pMin)))) img
+   where pMax = fromIntegral (V.foldl' (\acc i -> max acc i) 0 dat)::Rational
+         pMin = fromIntegral (V.foldl' (\acc i -> min acc i) 255 dat)::Rational
+         dat = imageData img
 
 mean :: Fractional a => [a] -> a
 mean [] = 0
@@ -80,16 +114,11 @@ meanInRect img (x,y) (xd,yd) = floor $ weigthedMean valAndWgt
          y2 yi = min (fromIntegral (yi+1)) (y+yd)
          valAndWgt = map (\(a,b) -> (pixelAt img a b,area a b)) inds
 
+-- Old, can not resize
 asciify :: DynamicImage -> String
 asciify = grayScaleToAscii . grayscaleImage
 
-unsafe = do
-   dyImg <- readImage "test.png"
-   return $ (\(ImageY8 t) -> t) (fromRight dyImg)
-
-invert :: (Image Pixel8) -> (Image Pixel8)
-invert = pixelMap (\p -> (255 - p) :: Word8)
-
+-- uses old
 asciifyFile :: String -> String -> IO ( Maybe String )
 asciifyFile inpath outpath = do
    dyImg <- readImage inpath
@@ -118,6 +147,13 @@ grayscaleImage dyImage = case dyImage of
    ImageRGB8   pixRGB8    -> pixelMap computeLuma pixRGB8 -- works
    ImageRGBA8  pixRGBA8   -> gsRGBA8 pixRGBA8 -- not working
    ImageYCbCr8 pixYCbCr8  -> pixelMap computeLuma pixYCbCr8 -- untested
+
+dyImageType dyImage = case dyImage of
+   ImageY8     pix8       -> "ImageY8"
+   ImageYA8    pixYA8     -> "ImageYA8"
+   ImageRGB8   pixRGB8    -> "ImageRGB8"
+   ImageRGBA8  pixRGBA8   -> "ImageRGBA8"
+   ImageYCbCr8 pixYCbCr8  -> "ImageYCbCr8"
 
 -- not workisg properly
 gsRGBA8 :: Image PixelRGBA8 -> Image Pixel8
@@ -150,14 +186,19 @@ approx n
 
 -- naive
 asciiReplace n
-   | n >= 230      = ' '
-   | n >= 200      = '.'
-   | n >= 170      = '+'
-   | n >= 130      = 'o'
-   | n >= 100      = 'O'
-   | n >= 70       = '#'
-   | n >= 40       = 'X'
-   | otherwise     = '@'
+   | n >= 240      = ' '
+   | n >= 220      = '`'
+   | n >= 200      = ','
+   | n >= 180      = '-'
+   | n >= 160      = '~'
+   | n >= 140      = '+'
+   | n >= 120      = '='
+   | n >= 100      = 'i'
+   | n >= 80       = 'T'
+   | n >= 60       = 'O'
+   | n >= 40       = '0'
+   | n >= 20       = 'Z'
+   | otherwise     = 'M'
 
 aSToA :: (Quadrant,Quadrant,Quadrant,Quadrant) -> Char
 -- All Blanks
