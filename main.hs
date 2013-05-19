@@ -15,20 +15,12 @@ type RCord = (Rational, Rational)
 
 data Quadrant = Blank | Light | Dark
 
--- write chars
-writeChars = do
-   handle <- openFile "chars.txt" WriteMode
-   hPutStr handle (map chr [32..126])
-
--- end write chars
-
-tl (x,_,_,_) = x
-tr (_,x,_,_) = x
-bl (_,_,x,_) = x
-br (_,_,_,x) = x
-
 testGSImage fname = do
    dy <- readImage fname
+   if notSupportedYet (fromRight dy) then
+      putStrLn "Not supported"
+   else
+      putStrLn "supported"
    return $ grayscaleImage (fromRight dy)
 
 heightToWidth :: Rational
@@ -49,7 +41,9 @@ test fname w = do
    putStr str
    hPutStr h2 str
 
---compAsciify :: Image Pixel8 -> Int -> String
+-- Takes grayslake Image and returns a string of ascii characters
+-- representing the image that is the given width wide in characters
+compAsciify :: Image Pixel8 -> Int -> String
 compAsciify iMG chsWide = foldl (\acc j -> acc ++ row j ++ "\n") ""
    [0..(chsHigh)]
    where img = normPixels iMG
@@ -59,6 +53,8 @@ compAsciify iMG chsWide = foldl (\acc j -> acc ++ row j ++ "\n") ""
                ((fromIntegral i)*(fst dim),(fromIntegral c)*(snd dim)) dim) )
                [0..(chsWide-1)]
 
+-- Same thing as above but uses a different algorithm
+scaleAsciify :: Image Pixel8 -> Int -> String
 scaleAsciify iMG chsWide = foldl (\acc j -> acc ++ row j ++ "\n") ""
    [0..(chsHigh)]
    where img = normPixels iMG
@@ -68,16 +64,14 @@ scaleAsciify iMG chsWide = foldl (\acc j -> acc ++ row j ++ "\n") ""
                ((fromIntegral i)*(fst dim),(fromIntegral c)*(snd dim)) dim)
                [0..(chsWide-1)]
 
+-- Normalize the grayscale image so the darkest pixel is zero and the
+-- brightest is 255
 normPixels :: Image Pixel8 -> Image Pixel8
 normPixels img = pixelMap
    (\p -> floor (((fromIntegral p)-pMin)*(255/(pMax-pMin)))) img
    where pMax = fromIntegral (V.foldl' (\acc i -> max acc i) 0 dat)::Rational
          pMin = fromIntegral (V.foldl' (\acc i -> min acc i) 255 dat)::Rational
          dat = imageData img
-
-mean :: Fractional a => [a] -> a
-mean [] = 0
-mean xs = (sum xs) / (fromIntegral $ length xs)
 
 weigthedMean :: [(Word8,Rational)] -> Rational
 weigthedMean xs = if den /= 0 then num / den else 0
@@ -114,40 +108,16 @@ meanInRect img (x,y) (xd,yd) = floor $ weigthedMean valAndWgt
          y2 yi = min (fromIntegral (yi+1)) (y+yd)
          valAndWgt = map (\(a,b) -> (pixelAt img a b,area a b)) inds
 
--- Old, can not resize
-asciify :: DynamicImage -> String
-asciify = grayScaleToAscii . grayscaleImage
-
--- uses old
-asciifyFile :: String -> String -> IO ( Maybe String )
-asciifyFile inpath outpath = do
-   dyImg <- readImage inpath
-   if isRight dyImg then do
-      handle <- openFile outpath WriteMode
-      hPutStr handle $ (asciify . fromRight) dyImg
-      return Nothing
-   else return $ Just (fromLeft dyImg)
-
-grayScaleToAscii :: (Image Pixel8) -> String
-grayScaleToAscii img = gRow 0
-   where v = imageData img
-         w = imageWidth img
-         h = imageHeight img
-         gRow i
-            | i >= V.length v       = []
-            | (i+1) `rem` w == 0    = asciiReplace (v V.! i) : '\n' :
-                                             gRow (i+1)
-            | otherwise             = asciiReplace (v V.! i) : gRow (i+1)
-
 -- Convert a dynamic image to grayscale of its image
 grayscaleImage :: DynamicImage -> Image Pixel8
 grayscaleImage dyImage = case dyImage of
-   ImageY8     pix8       -> pix8 -- works
+   ImageY8     pix8       -> pix8
    ImageYA8    pixYA8     -> pixelMap computeLuma pixYA8 -- untested
    ImageRGB8   pixRGB8    -> pixelMap computeLuma pixRGB8 -- works
-   ImageRGBA8  pixRGBA8   -> gsRGBA8 pixRGBA8 -- not working
+   ImageRGBA8  pixRGBA8   -> pixelMap computeLuma pixRGBA8
    ImageYCbCr8 pixYCbCr8  -> pixelMap computeLuma pixYCbCr8 -- untested
 
+dyImageType :: DynamicImage -> String
 dyImageType dyImage = case dyImage of
    ImageY8     pix8       -> "ImageY8"
    ImageYA8    pixYA8     -> "ImageYA8"
@@ -155,22 +125,13 @@ dyImageType dyImage = case dyImage of
    ImageRGBA8  pixRGBA8   -> "ImageRGBA8"
    ImageYCbCr8 pixYCbCr8  -> "ImageYCbCr8"
 
--- not workisg properly
-gsRGBA8 :: Image PixelRGBA8 -> Image Pixel8
-gsRGBA8 = pixelMap (\(PixelRGBA8 r g b a) ->
-   round (
-   (0.21 * (fromIntegral r) +
-    0.71 * (fromIntegral g) +
-    0.07 * (fromIntegral b) )*(fromIntegral a ) ) )
-
-transRGBA8 :: Image PixelRGBA8 -> Image Pixel8
-transRGBA8 img = pixelMap getTransparency img
-
---transYCbCr8 :: Image PixelYCbCr8 -> Image Pixel8
---transYCbCr8 img = pixelMap getTransparency img
-
-getTransparency :: PixelRGBA8 -> Pixel8
-getTransparency (PixelRGBA8 r g b a) = a
+notSupportedYet :: DynamicImage -> Bool
+notSupportedYet dyImage = case dyImage of
+   ImageY8     pix8       -> False
+   ImageYA8    pixYA8     -> True
+   ImageRGB8   pixRGB8    -> False
+   ImageRGBA8  pixRGBA8   -> True
+   ImageYCbCr8 pixYCbCr8  -> True
 
 shapeToAscii :: CharShape -> Char
 shapeToAscii = aSToA . aShape
@@ -184,7 +145,8 @@ approx n
    | n >= 70  = Light
    | otherwise = Dark
 
--- naive
+-- Character Mappings
+asciiReplace :: Word8 -> Char
 asciiReplace n
    | n >= 240      = ' '
    | n >= 220      = '`'
@@ -201,7 +163,6 @@ asciiReplace n
    | otherwise     = 'M'
 
 aSToA :: (Quadrant,Quadrant,Quadrant,Quadrant) -> Char
--- All Blanks
 aSToA (Blank, Blank, Blank, Blank) = ' '
 aSToA (Blank, Blank, Blank, Light) = '.'
 aSToA (Blank, Blank, Blank, Dark)  = '.'
