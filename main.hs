@@ -1,4 +1,10 @@
 
+module Asciify
+ ( compAsciify
+ , scaleAsciify
+ , test
+ ) where
+
 import Codec.Picture
 import Codec.Picture.Types
 import Data.Word
@@ -13,7 +19,16 @@ type CharShape = (Word8, Word8, Word8, Word8)
 
 type RCord = (Rational, Rational)
 
-data Quadrant = Blank | Light | Dark
+data Quadrant = Blank | Light | Dark deriving (Show, Ord, Eq)
+
+--               ___   ___   ___   ___   ___  ___  ___  ___  ___  ___   ___
+--              |_|_| |#|_| |_|#| |_|_| |_|_||#|_||_|#||#|#||_|_||_|#| |#|_|
+--              |_|_| |_|_| |_|_| |#|_| |_|#||_|#||#|_||_|_||#|#||_|#| |#|_|
+data ShapeType = FLT | TPL | TPR | BTL | BTR | DR | DL | TP | BT | RT | LFT |
+--              ___   ___   ___   ___
+--             |#|#| |#|#| |_|#| |#|_|
+--             |_|#| |#|_| |#|#| |#|#|
+                NBL | NBR | NTL | NTR
 
 testGSImage fname = do
    dy <- readImage fname
@@ -146,6 +161,7 @@ approx n
    | otherwise = Dark
 
 -- Character Mappings
+-- Simple grayscale value to character
 asciiReplace :: Word8 -> Char
 asciiReplace n
    | n >= 240      = ' '
@@ -162,6 +178,50 @@ asciiReplace n
    | n >= 20       = 'Z'
    | otherwise     = 'M'
 
+shapeType :: CharShape -> ShapeType
+shapeType (a,b,c,d)
+   | a == b && a == c && a == d              = FLT
+   | a > b && a > c && a > d                 = TPL
+   | b > a && b > c && b > d                 = TPR
+   | c > a && c > b && c > d                 = BTL
+   | d > a && d > b && d > c                 = BTR
+   | a > b && a > c && (a >= d || d >= a)    = DR
+   | b > a && b > d && (b >= c || c >= b)    = DL
+   | a > c && a > d && (a >= b || b >= a)    = TP
+   | c > a && c > a && (c >= d || d >= c)    = BT
+   | b > a && b > c && (b >= d || d >= b)    = RT
+   | a > b && a > d && (a >= c || c >= a)    = LFT
+   | a > c && b > c && d > c                 = NBL
+   | a > d && b > d && c > d                 = NBR
+   | b > a && c > a && d > a                 = NTL
+   | a > b && c > b && d > b                 = NTR
+   | otherwise                               = error ("unkown shape type" ++
+         (show (a,b,c,d)))
+
+{-
+sToA :: CharShape -> Char
+sToA (a,b,c,d) =
+   let avg = (fromIntegral (a+b+c+d))/4
+       spt = shapeType (a,b,c,d)
+   in avgShapeTChar spt avg
+
+avgShapeTChar FLT avg =
+avgShapeTChar TPL avg =
+avgShapeTChar TPR avg =
+avgShapeTChar BTL avg =
+avgShapeTChar BTR avg =
+avgShapeTChar DR  avg =
+avgShapeTChar DL  avg =
+avgShapeTChar TP  avg =
+avgShapeTChar BT  avg =
+avgShapeTChar RT  avg =
+avgShapeTChar LFT avg =
+avgShapeTChar NBL avg =
+avgShapeTChar NBR avg =
+avgShapeTChar NTL avg =
+avgShapeTChar NTR avg = -}
+
+-- Approximate shape to character
 aSToA :: (Quadrant,Quadrant,Quadrant,Quadrant) -> Char
 aSToA (Blank, Blank, Blank, Blank) = ' '
 aSToA (Blank, Blank, Blank, Light) = '.'
