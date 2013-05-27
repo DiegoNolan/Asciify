@@ -1,6 +1,6 @@
 
 module Asciify
- ( compAsciify
+ ( quadAsciify
  , scaleAsciify
  , test
  ) where
@@ -15,20 +15,18 @@ import qualified Data.Vector.Storable as V
 import Data.Char
 import System.IO
 
+-- Contains the averages of the grayscale pixel values in each quadrant
 type CharShape = (Word8, Word8, Word8, Word8)
 
+-- Ratinal coordinate
 type RCord = (Rational, Rational)
 
+-- A Quadrant of a character, only has three stages now
 data Quadrant = Blank | Light | Dark deriving (Show, Ord, Eq)
 
---               ___   ___   ___   ___   ___  ___  ___  ___  ___  ___   ___
---              |_|_| |#|_| |_|#| |_|_| |_|_||#|_||_|#||#|#||_|_||_|#| |#|_|
---              |_|_| |_|_| |_|_| |#|_| |_|#||_|#||#|_||_|_||#|#||_|#| |#|_|
-data ShapeType = FLT | TPL | TPR | BTL | BTR | DR | DL | TP | BT | RT | LFT |
---              ___   ___   ___   ___
---             |#|#| |#|#| |_|#| |#|_|
---             |_|#| |#|_| |#|#| |#|#|
-                NBL | NBR | NTL | NTR
+-- This is the ratio we use to adjust for the fact that characters are not squares.
+widthToHeight:: Rational
+widthToHeight = (2/3)
 
 testGSImage fname = do
    dy <- readImage fname
@@ -38,16 +36,15 @@ testGSImage fname = do
       putStrLn "supported"
    return $ grayscaleImage (fromRight dy)
 
-heightToWidth :: Rational
-heightToWidth = (2/3)
-
+-- String helper, should be moved
 remFileExt :: String -> String
 remFileExt = reverse . (drop 1) . ( dropWhile (/='.')) . reverse
 
+-- Run both examples
 test fname w = do
    img <- testGSImage fname
    handle <- openFile ((remFileExt fname) ++ "_quad.txt") WriteMode
-   let str = compAsciify img w
+   let str = quadAsciify img w
    putStr str
    hPutStr handle str
 
@@ -58,8 +55,9 @@ test fname w = do
 
 -- Takes grayslake Image and returns a string of ascii characters
 -- representing the image that is the given width wide in characters
-compAsciify :: Image Pixel8 -> Int -> String
-compAsciify iMG chsWide = foldl (\acc j -> acc ++ row j ++ "\n") ""
+-- Splits each character into a quadrant
+quadAsciify :: Image Pixel8 -> Int -> String
+quadAsciify iMG chsWide = foldl (\acc j -> acc ++ row j ++ "\n") ""
    [0..(chsHigh)]
    where img = normPixels iMG
          dim = charDims img chsWide
@@ -69,6 +67,7 @@ compAsciify iMG chsWide = foldl (\acc j -> acc ++ row j ++ "\n") ""
                [0..(chsWide-1)]
 
 -- Same thing as above but uses a different algorithm
+-- Each characte is considered in its enitirity but has more regions
 scaleAsciify :: Image Pixel8 -> Int -> String
 scaleAsciify iMG chsWide = foldl (\acc j -> acc ++ row j ++ "\n") ""
    [0..(chsHigh)]
@@ -76,7 +75,7 @@ scaleAsciify iMG chsWide = foldl (\acc j -> acc ++ row j ++ "\n") ""
          dim = charDims img chsWide
          chsHigh = ceiling ((fromIntegral (imageHeight img))/(snd dim))
          row c = map (\i -> asciiReplace $ meanInRect img
-               ((fromIntegral i)*(fst dim),(fromIntegral c)*(snd dim)) dim)
+               ((fromIntegral i)*(fst dim),(fromIntegral c)*(snd dim)) dim )
                [0..(chsWide-1)]
 
 -- Normalize the grayscale image so the darkest pixel is zero and the
@@ -86,14 +85,17 @@ normPixels img = pixelMap
    (\p -> floor (((fromIntegral p)-pMin)*(255/(pMax-pMin)))) img
    where pMax = fromIntegral (V.foldl' (\acc i -> max acc i) 0 dat)::Rational
          pMin = fromIntegral (V.foldl' (\acc i -> min acc i) 255 dat)::Rational
-         dat = imageData img
+         dat  = imageData img
 
 weigthedMean :: [(Word8,Rational)] -> Rational
-weigthedMean xs = if den /= 0 then num / den else 0
+weigthedMean xs = if den /= 0 then num / den else 255 -- Catch divide by zeros
    where num = foldl (\acc (a,b) -> (fromIntegral a)*b + acc) 0 xs
          den = foldl (\acc (_,b) -> acc + b) 0 xs
 
-shape :: (Image Pixel8) -> RCord -> RCord -> CharShape
+shape :: (Image Pixel8) -> --grayscale image
+   RCord -> -- Offset from the upper left of the image
+   RCord -> -- dimensions of the rectangle
+   CharShape -- The averages of each quadrant
 shape img os dim = ( (m os hd) , (m (hx,snd os) hd) ,
    (m (fst os, hy) hd) , (m (hx,hy) hd) )
       where m = meanInRect img
@@ -102,13 +104,15 @@ shape img os dim = ( (m os hd) , (m (hx,snd os) hd) ,
             hy = (snd os) + (snd hd)
 
 -- Returns the dimensions of a character in pixels
-charDims :: (Image Pixel8) -> Int -> RCord
-charDims img charsWide = (xdim, xdim/heightToWidth)
+charDims :: (Image Pixel8) ->
+   Int -> --How many characters wide the ascii plans to be
+   RCord -- Width x Height
+charDims img charsWide = (xdim, xdim/widthToHeight)
    where w = (fromIntegral . imageWidth) img :: Rational
          h = (fromIntegral . imageHeight) img :: Rational
          xdim = w / (fromIntegral charsWide)
 
--- The dimensios should be half of the actual character dimension
+-- Returns the mean weighted pixel value in a rectangle of a grayscale image
 meanInRect :: (Image Pixel8) -> RCord -> RCord -> Word8
 meanInRect img (x,y) (xd,yd) = floor $ weigthedMean valAndWgt
    where maxX = (imageWidth img) - 1
@@ -177,49 +181,6 @@ asciiReplace n
    | n >= 40       = '0'
    | n >= 20       = 'Z'
    | otherwise     = 'M'
-
-shapeType :: CharShape -> ShapeType
-shapeType (a,b,c,d)
-   | a == b && a == c && a == d              = FLT
-   | a > b && a > c && a > d                 = TPL
-   | b > a && b > c && b > d                 = TPR
-   | c > a && c > b && c > d                 = BTL
-   | d > a && d > b && d > c                 = BTR
-   | a > b && a > c && (a >= d || d >= a)    = DR
-   | b > a && b > d && (b >= c || c >= b)    = DL
-   | a > c && a > d && (a >= b || b >= a)    = TP
-   | c > a && c > a && (c >= d || d >= c)    = BT
-   | b > a && b > c && (b >= d || d >= b)    = RT
-   | a > b && a > d && (a >= c || c >= a)    = LFT
-   | a > c && b > c && d > c                 = NBL
-   | a > d && b > d && c > d                 = NBR
-   | b > a && c > a && d > a                 = NTL
-   | a > b && c > b && d > b                 = NTR
-   | otherwise                               = error ("unkown shape type" ++
-         (show (a,b,c,d)))
-
-{-
-sToA :: CharShape -> Char
-sToA (a,b,c,d) =
-   let avg = (fromIntegral (a+b+c+d))/4
-       spt = shapeType (a,b,c,d)
-   in avgShapeTChar spt avg
-
-avgShapeTChar FLT avg =
-avgShapeTChar TPL avg =
-avgShapeTChar TPR avg =
-avgShapeTChar BTL avg =
-avgShapeTChar BTR avg =
-avgShapeTChar DR  avg =
-avgShapeTChar DL  avg =
-avgShapeTChar TP  avg =
-avgShapeTChar BT  avg =
-avgShapeTChar RT  avg =
-avgShapeTChar LFT avg =
-avgShapeTChar NBL avg =
-avgShapeTChar NBR avg =
-avgShapeTChar NTL avg =
-avgShapeTChar NTR avg = -}
 
 -- Approximate shape to character
 aSToA :: (Quadrant,Quadrant,Quadrant,Quadrant) -> Char
