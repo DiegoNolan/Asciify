@@ -7,6 +7,7 @@ module Asciify
 
 import Codec.Picture
 import Codec.Picture.Types
+import Data.List
 import Data.Word
 import Data.Either.Unwrap
 import Data.Functor ((<$>))
@@ -18,18 +19,38 @@ import System.IO
 -- Contains the averages of the grayscale pixel values in each quadrant
 type CharShape = (Word8, Word8, Word8, Word8)
 
+data NovemShape = NovemShape !Word8 !Word8 !Word8
+                             !Word8 !Word8 !Word8
+                             !Word8 !Word8 !Word8
+
 -- Ratinal coordinate
 type RCord = (Rational, Rational)
 
 -- A Quadrant of a character, only has three stages now
 data Quadrant = Blank | Light | Dark deriving (Show, Ord, Eq)
 
+-- For Novemant method
+data Brightness = Bnk | Lgt | Drk | Bck deriving (Show, Ord, Eq)
+
+data Novemant = Novemant !Brightness
+                         !Brightness
+                         !Brightness
+                         !Brightness
+                         !Brightness
+                         !Brightness
+                         !Brightness
+                         !Brightness
+                         !Brightness
+                         deriving (Show, Ord, Eq)
+
 -- This is the ratio we use to adjust for the fact that characters are not squares.
 widthToHeight:: Rational
 widthToHeight = (2/3)
 
 testGSImage fname = do
+   putStrLn "start"
    dy <- readImage fname
+   putStrLn "read image"
    if notSupportedYet (fromRight dy) then
       putStrLn "Not supported"
    else
@@ -42,26 +63,45 @@ remFileExt = reverse . (drop 1) . ( dropWhile (/='.')) . reverse
 
 -- Run both examples
 test fname w = do
-   img <- testGSImage fname
-   handle <- openFile ((remFileExt fname) ++ "_quad.txt") WriteMode
+   img' <- testGSImage fname
+   putStrLn "Done reading image"
+   let img = normPixels img'
+   putStrLn "Done normalizing"
+
+   h1 <- openFile ((remFileExt fname) ++ "_novem.txt") WriteMode
+   let str = novemAsciify img w
+   putStr str
+   hPutStr h1 str
+
+   h2 <- openFile ((remFileExt fname) ++ "_quad.txt") WriteMode
    let str = quadAsciify img w
    putStr str
-   hPutStr handle str
+   hPutStr h2 str
 
-   h2 <- openFile ((remFileExt fname) ++ "_scale.txt") WriteMode
+   h3 <- openFile ((remFileExt fname) ++ "_scale.txt") WriteMode
    let str = scaleAsciify img w
    putStr str
-   hPutStr h2 str
+   hPutStr h3 str
+
+novemAsciify :: Image Pixel8 -> Int -> String
+novemAsciify img chsWide = foldl (\acc j -> acc ++ row j ++ "\n") ""
+   [0..chsHigh]
+   where dim = charDims img chsWide
+         chsHigh = floor -- used to be ceiling, unsure which one it should be
+            ((fromIntegral (imageHeight img))/(snd dim))
+         row c = map (\i -> nShapeToAsccii (nShape img
+               ((fromIntegral i)*(fst dim),(fromIntegral c)*(snd dim)) dim) )
+               [0..(chsWide-1)]
 
 -- Takes grayslake Image and returns a string of ascii characters
 -- representing the image that is the given width wide in characters
 -- Splits each character into a quadrant
 quadAsciify :: Image Pixel8 -> Int -> String
-quadAsciify iMG chsWide = foldl (\acc j -> acc ++ row j ++ "\n") ""
+quadAsciify img chsWide = foldl (\acc j -> acc ++ row j ++ "\n") ""
    [0..(chsHigh)]
-   where img = normPixels iMG
-         dim = charDims img chsWide
-         chsHigh = ceiling ((fromIntegral (imageHeight img))/(snd dim))
+   where dim = charDims img chsWide
+         chsHigh = floor -- used to be ceiling, unsure which one it should be
+            ((fromIntegral (imageHeight img))/(snd dim))
          row c = map (\i -> shapeToAscii (shape img
                ((fromIntegral i)*(fst dim),(fromIntegral c)*(snd dim)) dim) )
                [0..(chsWide-1)]
@@ -69,11 +109,10 @@ quadAsciify iMG chsWide = foldl (\acc j -> acc ++ row j ++ "\n") ""
 -- Same thing as above but uses a different algorithm
 -- Each characte is considered in its enitirity but has more regions
 scaleAsciify :: Image Pixel8 -> Int -> String
-scaleAsciify iMG chsWide = foldl (\acc j -> acc ++ row j ++ "\n") ""
+scaleAsciify img chsWide = foldl (\acc j -> acc ++ row j ++ "\n") ""
    [0..(chsHigh)]
-   where img = normPixels iMG
-         dim = charDims img chsWide
-         chsHigh = ceiling ((fromIntegral (imageHeight img))/(snd dim))
+   where dim = charDims img chsWide
+         chsHigh = floor ((fromIntegral (imageHeight img))/(snd dim))
          row c = map (\i -> asciiReplace $ meanInRect img
                ((fromIntegral i)*(fst dim),(fromIntegral c)*(snd dim)) dim )
                [0..(chsWide-1)]
@@ -102,6 +141,18 @@ shape img os dim = ( (m os hd) , (m (hx,snd os) hd) ,
             hd = ((fst dim)/2, (snd dim)/2)
             hx = (fst os) + (fst hd)
             hy = (snd os) + (snd hd)
+
+nShape :: (Image Pixel8) ->
+   RCord ->
+   RCord ->
+   NovemShape
+nShape img (ox,oy) dim = NovemShape
+   (m (ox,oy) td)       (m (ox+tdx,oy) td)       (m (ox+2*tdx,oy) td)
+   (m (ox,oy+tdy) td)   (m (ox+tdx,oy+tdy) td)   (m (ox+2*tdx,oy+tdy) td)
+   (m (ox,oy+2*tdy) td) (m (ox+tdx,oy+2*tdy) td) (m (ox+2*tdx,oy+2*tdy) td)
+   where m = meanInRect img
+         td = ((fst dim)/3, (snd dim)/3)
+         (tdx,tdy) = td
 
 -- Returns the dimensions of a character in pixels
 charDims :: (Image Pixel8) ->
@@ -158,11 +209,29 @@ shapeToAscii = aSToA . aShape
 aShape :: CharShape -> (Quadrant,Quadrant,Quadrant,Quadrant)
 aShape (a,b,c,d) = (approx a,approx b,approx c,approx d)
 
+nShapeToAsccii :: NovemShape -> Char
+nShapeToAsccii = (bestMatch allChars) . novShape
+
+allChars = map chr [32..126]
+
+novShape :: NovemShape -> Novemant
+novShape (NovemShape a b c d e f g h i) =
+   Novemant (novemApprox a) (novemApprox b) (novemApprox c)
+            (novemApprox d) (novemApprox e) (novemApprox f)
+            (novemApprox g) (novemApprox h) (novemApprox i)
+
 approx :: Word8 -> Quadrant
 approx n
    | n >= 150  = Blank
    | n >= 70  = Light
    | otherwise = Dark
+
+novemApprox :: Word8 -> Brightness
+novemApprox n
+   | n >= 150  = Bnk
+   | n >= 90   = Lgt
+   | n >= 25   = Drk
+   | otherwise = Bck
 
 -- Character Mappings
 -- Simple grayscale value to character
@@ -181,6 +250,24 @@ asciiReplace n
    | n >= 40       = '0'
    | n >= 20       = 'Z'
    | otherwise     = 'M'
+
+bestMatch :: String -> Novemant -> Char
+bestMatch chs n = snd $! foldl' (\(mean,char) (mnext, chnext) -> if mnext < mean then
+      (mnext,chnext) else (mean,char) ) (100000, ' ') meanAndnov
+   where meanAndnov = map (\x -> (meanSquare n (charToNovem x), x)) chs
+
+meanSquare :: Novemant -> Novemant -> Float
+meanSquare (Novemant a b c d e f g h i) (Novemant j k l m n o p q r)
+   = sqrt $!
+      (brightDiff a j)**2 +
+      (brightDiff b k)**2 +
+      (brightDiff c l)**2 +
+      (brightDiff d m)**2 +
+      (brightDiff e n)**2 +
+      (brightDiff f o)**2 +
+      (brightDiff g p)**2 +
+      (brightDiff h q)**2 +
+      (brightDiff i r)**2
 
 -- Approximate shape to character
 aSToA :: (Quadrant,Quadrant,Quadrant,Quadrant) -> Char
@@ -265,3 +352,114 @@ aSToA (Dark, Dark, Light, Dark)    = '9'
 aSToA (Dark, Dark, Dark, Blank)    = 'F'
 aSToA (Dark, Dark, Dark, Light)    = '#'
 aSToA (Dark, Dark, Dark, Dark)     = '@'
+
+brightDiff :: Brightness -> Brightness -> Float
+brightDiff Bnk Bnk = 0
+brightDiff Bnk Lgt = 1
+brightDiff Bnk Drk = 2
+brightDiff Bnk Bck = 3
+brightDiff Lgt Lgt = 0
+brightDiff Lgt Drk = 1
+brightDiff Lgt Bck = 2
+brightDiff Drk Drk = 0
+brightDiff Drk Bck = 1
+brightDiff Bck Bck = 0
+brightDiff x y = brightDiff y x
+
+charToNovem :: Char -> Novemant
+charToNovem ' '   = Novemant Bnk Bnk Bnk Bnk Bnk Bnk Bnk Bnk Bnk
+charToNovem '!'   = Novemant Bnk Drk Bnk Bnk Drk Bnk Bnk Lgt Bnk
+charToNovem '\"'  = Novemant Bnk Drk Bnk Bnk Bnk Bnk Bnk Bnk Bnk
+charToNovem '#'   = Novemant Bnk Drk Drk Drk Bck Drk Drk Drk Bnk
+charToNovem '$'   = Novemant Bnk Drk Bnk Drk Bck Drk Bnk Drk Bnk
+charToNovem '%'   = Novemant Bck Lgt Bnk Drk Bck Drk Bnk Lgt Bck
+charToNovem '&'   = Novemant Bnk Drk Lgt Drk Bck Lgt Drk Drk Drk
+charToNovem '\''  = Novemant Bnk Lgt Bnk Bnk Bnk Bnk Bnk Bnk Bnk
+charToNovem '('   = Novemant Bnk Drk Bnk Drk Lgt Bnk Bnk Drk Bnk
+charToNovem ')'   = Novemant Bnk Drk Bnk Bnk Lgt Drk Bnk Drk Bnk
+charToNovem '*'   = Novemant Lgt Bck Lgt Bnk Lgt Bnk Bnk Bnk Bnk
+charToNovem '+'   = Novemant Bnk Drk Bnk Drk Bck Drk Bnk Drk Bnk
+charToNovem ','   = Novemant Bnk Bnk Bnk Bnk Bnk Bnk Bnk Drk Bnk
+charToNovem '-'   = Novemant Bnk Bnk Bnk Lgt Drk Lgt Bnk Bnk Bnk
+charToNovem '.'   = Novemant Bnk Bnk Bnk Bnk Bnk Bnk Bnk Lgt Bnk
+charToNovem '/'   = Novemant Bnk Bnk Drk Bnk Drk Bnk Drk Bnk Bnk
+charToNovem '0'   = Novemant Lgt Drk Lgt Drk Lgt Drk Lgt Drk Lgt
+charToNovem '1'   = Novemant Bnk Drk Bnk Bnk Lgt Bnk Lgt Drk Lgt
+charToNovem '2'   = Novemant Lgt Drk Lgt Bnk Lgt Drk Lgt Drk Drk
+charToNovem '3'   = Novemant Lgt Drk Drk Bnk Drk Drk Lgt Bnk Bnk
+charToNovem '4'   = Novemant Bnk Drk Drk Drk Drk Drk Bnk Bnk Lgt
+charToNovem '5'   = Novemant Drk Drk Drk Drk Lgt Bnk Bnk Drk Lgt
+charToNovem '6'   = Novemant Bnk Drk Lgt Drk Drk Lgt Lgt Drk Lgt
+charToNovem '7'   = Novemant Lgt Drk Drk Bnk Drk Lgt Drk Bnk Bnk
+charToNovem '8'   = Novemant Lgt Drk Lgt Lgt Drk Lgt Lgt Drk Lgt
+charToNovem '9'   = Novemant Lgt Lgt Lgt Lgt Drk Lgt Lgt Bck Lgt
+charToNovem ':'   = Novemant Bnk Lgt Bnk Bnk Lgt Bnk Bnk Lgt Bnk
+charToNovem ';'   = Novemant Bnk Lgt Bnk Bnk Lgt Bnk Bnk Drk Bnk
+charToNovem '<'   = Novemant Bnk Lgt Lgt Lgt Drk Lgt Bnk Lgt Lgt
+charToNovem '='   = Novemant Bnk Bnk Bnk Bck Bck Bck Bnk Bnk Bnk
+charToNovem '>'   = Novemant Lgt Lgt Bnk Lgt Drk Lgt Lgt Lgt Bnk
+charToNovem '?'   = Novemant Lgt Drk Lgt Bnk Drk Lgt Bnk Bnk Drk
+charToNovem '@'   = Novemant Lgt Drk Lgt Drk Bck Drk Lgt Drk Lgt
+charToNovem 'A'   = Novemant Bnk Drk Bnk Lgt Bck Lgt Drk Bnk Drk
+charToNovem 'B'   = Novemant Drk Drk Lgt Bck Bck Drk Drk Drk Lgt
+charToNovem 'C'   = Novemant Lgt Drk Lgt Drk Bnk Bnk Lgt Drk Lgt
+charToNovem 'D'   = Novemant Drk Lgt Bnk Drk Bnk Drk Drk Lgt Bnk
+charToNovem 'E'   = Novemant Bck Drk Drk Bck Drk Drk Bck Drk Drk
+charToNovem 'F'   = Novemant Bck Drk Drk Bck Drk Drk Bck Bnk Bnk
+charToNovem 'G'   = Novemant Lgt Drk Lgt Drk Drk Drk Lgt Drk Lgt
+charToNovem 'H'   = Novemant Lgt Bnk Lgt Drk Drk Drk Lgt Bnk Lgt
+charToNovem 'I'   = Novemant Lgt Drk Lgt Bnk Drk Bnk Lgt Drk Lgt
+charToNovem 'J'   = Novemant Bnk Lgt Drk Bnk Bnk Drk Lgt Drk Lgt
+charToNovem 'K'   = Novemant Lgt Lgt Lgt Drk Bck Bnk Lgt Lgt Lgt
+charToNovem 'L'   = Novemant Lgt Bnk Bnk Lgt Bnk Bnk Drk Lgt Lgt
+charToNovem 'M'   = Novemant Drk Drk Drk Bck Bck Bck Drk Bnk Drk
+charToNovem 'N'   = Novemant Bck Lgt Drk Drk Bck Drk Drk Lgt Bck
+charToNovem 'O'   = Novemant Lgt Drk Lgt Drk Bnk Drk Lgt Drk Lgt
+charToNovem 'P'   = Novemant Drk Lgt Lgt Drk Drk Lgt Lgt Bnk Bnk
+charToNovem 'Q'   = Novemant Lgt Drk Lgt Drk Bnk Drk Lgt Drk Drk
+charToNovem 'R'   = Novemant Bck Drk Lgt Bck Bck Drk Drk Bnk Lgt
+charToNovem 'S'   = Novemant Lgt Drk Lgt Drk Drk Drk Lgt Drk Lgt
+charToNovem 'T'   = Novemant Lgt Drk Lgt Bnk Drk Bnk Bnk Lgt Bnk
+charToNovem 'U'   = Novemant Drk Bnk Drk Drk Bnk Drk Lgt Drk Lgt
+charToNovem 'V'   = Novemant Drk Bnk Drk Bnk Drk Bnk Bnk Bck Bnk
+charToNovem 'W'   = Novemant Drk Bnk Drk Lgt Bck Lgt Bnk Bck Bnk
+charToNovem 'X'   = Novemant Drk Bnk Drk Bnk Bck Bnk Drk Bnk Drk
+charToNovem 'Y'   = Novemant Lgt Bnk Lgt Bnk Drk Bnk Bnk Drk Bnk
+charToNovem 'Z'   = Novemant Lgt Drk Drk Bnk Drk Bnk Drk Drk Lgt
+charToNovem '['   = Novemant Lgt Lgt Bnk Drk Bnk Bnk Lgt Lgt Bnk
+charToNovem '\\'  = Novemant Drk Bnk Bnk Bnk Drk Bnk Bnk Bnk Drk
+charToNovem ']'   = Novemant Lgt Lgt Bnk Bnk Bnk Drk Lgt Lgt Bnk
+charToNovem '^'   = Novemant Lgt Drk Lgt Bnk Bnk Drk Drk Drk Drk
+charToNovem '_'   = Novemant Bnk Bnk Bnk Bnk Bnk Bnk Lgt Drk Lgt
+charToNovem '`'   = Novemant Lgt Drk Bnk Bnk Bnk Bnk Bnk Bnk Bnk
+charToNovem 'a'   = Novemant Bnk Bnk Bnk Drk Bck Drk Drk Drk Drk
+charToNovem 'b'   = Novemant Lgt Bnk Bnk Drk Drk Drk Drk Drk Drk
+charToNovem 'c'   = Novemant Bnk Bnk Bnk Lgt Drk Lgt Lgt Drk Lgt
+charToNovem 'd'   = Novemant Bnk Bnk Lgt Drk Drk Drk Drk Drk Drk
+charToNovem 'e'   = Novemant Bnk Bnk Bnk Drk Drk Drk Drk Drk Drk
+charToNovem 'f'   = Novemant Bnk Lgt Lgt Lgt Lgt Lgt Bnk Lgt Bnk
+charToNovem 'g'   = Novemant Bnk Bnk Bnk Drk Drk Drk Drk Drk Drk
+charToNovem 'h'   = Novemant Lgt Bnk Bnk Drk Drk Drk Lgt Bnk Lgt
+charToNovem 'i'   = Novemant Bnk Lgt Bnk Bnk Lgt Bnk Lgt Drk Lgt
+charToNovem 'j'   = Novemant Bnk Lgt Bnk Bnk Drk Bnk Lgt Drk Lgt
+charToNovem 'k'   = Novemant Lgt Bnk Bnk Drk Drk Drk Lgt Bnk Lgt
+charToNovem 'l'   = Novemant Lgt Drk Bnk Bnk Drk Bnk Bnk Lgt Lgt
+charToNovem 'm'   = Novemant Bnk Bnk Bnk Drk Bck Drk Drk Drk Drk
+charToNovem 'n'   = Novemant Bnk Bnk Bnk Drk Drk Drk Lgt Bnk Lgt
+charToNovem 'o'   = Novemant Bnk Bnk Bnk Lgt Drk Lgt Lgt Drk Lgt
+charToNovem 'p'   = Novemant Bnk Bnk Bnk Drk Drk Bck Drk Drk Lgt
+charToNovem 'q'   = Novemant Bnk Bnk Bnk Drk Drk Bck Lgt Drk Drk
+charToNovem 'r'   = Novemant Bnk Bnk Bnk Lgt Drk Lgt Lgt Bnk Bnk
+charToNovem 's'   = Novemant Bnk Bnk Bnk Lgt Drk Lgt Lgt Drk Lgt
+charToNovem 't'   = Novemant Bnk Lgt Bnk Lgt Drk Lgt Bnk Drk Lgt
+charToNovem 'u'   = Novemant Bnk Bnk Bnk Lgt Bnk Lgt Lgt Drk Drk
+charToNovem 'v'   = Novemant Bnk Bnk Bnk Lgt Bnk Lgt Bnk Lgt Bnk
+charToNovem 'w'   = Novemant Bnk Bnk Bnk Lgt Lgt Lgt Lgt Drk Lgt
+charToNovem 'x'   = Novemant Bnk Bnk Bnk Drk Drk Drk Drk Drk Drk
+charToNovem 'y'   = Novemant Bnk Bnk Bnk Drk Drk Drk Drk Drk Drk
+charToNovem 'z'   = Novemant Bnk Bnk Bnk Drk Drk Drk Drk Drk Drk
+charToNovem '{'   = Novemant Bnk Lgt Lgt Lgt Drk Bnk Bnk Lgt Lgt
+charToNovem '|'   = Novemant Bnk Drk Bnk Bnk Drk Bnk Bnk Drk Bnk
+charToNovem '}'   = Novemant Lgt Lgt Drk Bnk Drk Lgt Lgt Lgt Bnk
+charToNovem '~'   = Novemant Bnk Bnk Bnk Drk Drk Drk Bnk Bnk Bnk
+
