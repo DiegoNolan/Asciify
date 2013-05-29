@@ -10,6 +10,13 @@ breakes the character rectangle into 9 different regions and tries to match
 a character.  There is still much improvement to be made.  Suggestion are
 welcome.
 
+You can test each algrothim in ghci by loading Asciify.hs and running
+
+   testAllAlgorithms "path_to_file" 80
+
+where 80 would be how many characters wide you want to results ascii art to
+be.
+
 ![Goku](http://chainmailninja.com/wp-content/uploads/goku.png)
 
 Novem Algorithm
