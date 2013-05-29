@@ -12,7 +12,7 @@ welcome.
 
 You can test each algrothim in ghci by loading Asciify.hs and running
 
-   testAllAlgorithms "path_to_file" 80
+      testAllAlgorithms "path_to_file" 80
 
 where 80 would be how many characters wide you want to results ascii art to
 be.
