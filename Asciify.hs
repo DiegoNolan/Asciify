@@ -1,7 +1,7 @@
 
 module Asciify
  ( asciify
- , Algorithm
+ , Algorithm (Single, Quad, Novem)
  , novemAsciify
  , quadAsciify
  , scaleAsciify
@@ -68,16 +68,19 @@ testAllAlgorithms fname w = do
          let str = novemAsciify img w
          putStr str
          hPutStr h1 str
+         hClose h1
 
          h2 <- openFile ((remFileExt fname) ++ "_quad.txt") WriteMode
          let str = quadAsciify img w
          putStr str
          hPutStr h2 str
+         hClose h2
 
          h3 <- openFile ((remFileExt fname) ++ "_scale.txt") WriteMode
          let str = scaleAsciify img w
          putStr str
          hPutStr h3 str
+         hClose h3
       Nothing     -> return ()
 
 asciify :: String -> Int -> Algorithm -> IO (Maybe String)
