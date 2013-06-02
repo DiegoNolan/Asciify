@@ -4,6 +4,8 @@
 *.txt
 *.jpg
 *.png
+Setup.hs
 images/
 main*
 GenerateMappings.hs
+dist/
